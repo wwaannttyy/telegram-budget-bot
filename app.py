@@ -1,7 +1,6 @@
 from quart import Quart, request, jsonify, send_from_directory
-from sqlalchemy import create_engine, Column, Integer, Float, Date, Time, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, Column, Integer, Float, Date, Time, ForeignKey, text, BigInteger
+from sqlalchemy.orm import declarative_base, sessionmaker
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 import os
@@ -9,7 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import asyncio
 
-load_dotenv()  # Загрузка переменных окружения из файла .env
+load_dotenv()
 
 app = Quart(__name__, static_folder='static')
 DATABASE_URL = f"postgresql://{os.getenv('DB_USERNAME')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
@@ -17,11 +16,10 @@ engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# Модель для хранения данных пользователя
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
-    telegram_id = Column(Integer, unique=True, nullable=False)
+    telegram_id = Column(BigInteger, unique=True, nullable=False)  # Изменено на BigInteger
     budget = Column(Float)
     last_day = Column(Date)
 
@@ -33,23 +31,47 @@ class Expense(Base):
     date = Column(Date, nullable=False)
     time = Column(Time, nullable=False)
 
-# Создание таблиц в базе данных
-Base.metadata.create_all(engine)
+def create_tables():
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    print("Таблицы успешно созданы")
 
-# Роуты Quart для обработки запросов от веб-приложения
+create_tables()
+
+@app.route('/')
+async def index():
+    return await send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/static/<path:path>')
+async def serve_static(path):
+    return await send_from_directory(app.static_folder, path)
+
 @app.route('/api/save_budget', methods=['POST'])
 async def save_budget():
     data = await request.get_json()
+    print(f"Получены данные: {data}")
+    if not isinstance(data['telegram_id'], int):
+        return jsonify({"status": "error", "message": "Invalid telegram_id"})
     session = Session()
-    user = session.query(User).filter_by(telegram_id=data['telegram_id']).first()
-    if not user:
-        user = User(telegram_id=data['telegram_id'])
-        session.add(user)
-    
-    user.budget = data['budget']
-    user.last_day = datetime.strptime(data['last_day'], '%Y-%m-%d').date()
-    session.commit()
-    session.close()
+    try:
+        user = session.query(User).filter_by(telegram_id=data['telegram_id']).first()
+        if not user:
+            user = User(telegram_id=data['telegram_id'])
+            session.add(user)
+            print(f"Создан новый пользователь с Telegram ID: {data['telegram_id']}")
+        else:
+            print(f"Обновление существующего пользователя с Telegram ID: {data['telegram_id']}")
+        
+        user.budget = float(data['budget'])
+        user.last_day = datetime.strptime(data['last_day'], '%Y-%m-%d').date()
+        session.commit()
+        print(f"Сохранен бюджет: {user.budget} для пользователя {user.telegram_id}")
+    except Exception as e:
+        print(f"Ошибка при сохранении бюджета: {e}")
+        session.rollback()
+        return jsonify({"status": "error", "message": str(e)})
+    finally:
+        session.close()
     return jsonify({"status": "success"})
 
 @app.route('/api/add_expense', methods=['POST'])
@@ -68,7 +90,6 @@ async def add_expense():
     session.close()
     return jsonify({"status": "error", "message": "User not found"})
 
-# Функции для Telegram бота
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     web_app_url = os.getenv('WEB_APP_URL')
     keyboard = [
@@ -87,8 +108,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session = Session()
-    user = session.query(User).filter_by(telegram_id=update.effective_user.id).first()
+    telegram_id = update.effective_user.id
+    print(f"Запрос баланса для пользователя с Telegram ID: {telegram_id}")
+    user = session.query(User).filter_by(telegram_id=telegram_id).first()
     if user:
+        print(f"Найден пользователь: {user.telegram_id}, бюджет: {user.budget}")
         total_expenses = session.query(Expense).filter_by(user_id=user.id).with_entities(Expense.amount).all()
         total_expenses = sum([expense[0] for expense in total_expenses])
         remaining_budget = user.budget - total_expenses
@@ -97,6 +121,9 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message += f"Потрачено: {total_expenses:.2f}\n"
         message += f"Дата окончания бюджета: {user.last_day.strftime('%d.%m.%Y')}"
     else:
+        print(f"Пользователь не найден: {telegram_id}")
+        all_users = session.query(User).all()
+        print(f"Все пользователи в базе данных: {[user.telegram_id for user in all_users]}")
         message = "Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
     session.close()
     await update.message.reply_text(message)
@@ -131,7 +158,7 @@ async def daily_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             message = f"Ваш дневной лимит: {daily_limit:.2f}\n"
             message += f"Осталось дней: {days_left}"
         else:
-            message = "Срок вашего бюджета истек. Пожалуйста, обновите бюджет через веб-приложение."
+            message = "Срок вашего бюджета истек. Пожалуйста, обновите бюджет че��е�� веб-приложение."
     else:
         message = "Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
     session.close()
@@ -159,17 +186,28 @@ async def main():
     
     await asyncio.gather(bot_task, web_task)
 
-@app.route('/')
-async def index():
-    return await send_from_directory(app.static_folder, 'index.html')
+def print_all_users():
+    session = Session()
+    users = session.query(User).all()
+    print("Все пользователи в базе данных:")
+    for user in users:
+        print(f"ID: {user.id}, Telegram ID: {user.telegram_id}, Budget: {user.budget}, Last Day: {user.last_day}")
+    session.close()
 
-@app.route('/static/<path:path>')
-async def serve_static(path):
-    return await send_from_directory(app.static_folder, path)
+# Вызовите эту функцию перед запуском основного приложения
+print_all_users()
 
-@app.route('/<path:path>')
-async def catch_all(path):
-    return f"Запрошенный путь: {path}", 404
+def test_db_connection():
+    try:
+        session = Session()
+        session.execute(text("SELECT 1"))
+        print("Соединение с базой данных успешно установлено")
+    except Exception as e:
+        print(f"Ошибка при подключении к базе данных: {e}")
+    finally:
+        session.close()
+
+test_db_connection()
 
 if __name__ == '__main__':
     asyncio.run(main())

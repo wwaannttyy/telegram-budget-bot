@@ -1,3 +1,5 @@
+window.Telegram.WebApp.ready();
+
 let expenses = [];
 let totalBudget = 0;
 let isDeletePromptOpen = false; // Флаг, чтобы избежать двойного вызова
@@ -28,7 +30,15 @@ function goToMainScreen() {
 function saveBudgetToServer() {
     const budget = document.getElementById('budget').value;
     const lastDay = document.getElementById('last-day').value;
-    const telegramUserId = getTelegramUserId(); // Функция для получения Telegram User ID
+    const telegramUserId = getTelegramUserId();
+    
+    if (!telegramUserId) {
+        console.error('Не удалось получить ID пользователя Telegram');
+        alert('Ошибка: Не удалось получить ID пользователя Telegram');
+        return;
+    }
+
+    console.log('Сохранение бюджета:', budget, 'Последний день:', lastDay, 'Telegram ID:', telegramUserId);
 
     fetch('/api/save_budget', {
         method: 'POST',
@@ -44,10 +54,16 @@ function saveBudgetToServer() {
     .then(response => response.json())
     .then(data => {
         if (data.status === 'success') {
-            console.log('Budget saved successfully');
+            console.log('Бюджет успешно сохранен');
+            alert('Бюджет успешно сохранен');
         } else {
-            console.error('Error saving budget');
+            console.error('Ошибка при сохранении бюджета');
+            alert('Ошибка при сохранении бюджета');
         }
+    })
+    .catch(error => {
+        console.error('Ошибка при отправке запроса:', error);
+        alert('Произошла ошибка при сохранении бюджета');
     });
 }
 
@@ -162,7 +178,7 @@ function renderExpenses() {
                         }
                         isDeletePromptOpen = false;
                     }
-                }, 800); // Удержание в течение 800 миллисекунд
+                }, 800); // Удержание в течение 800 миллис��кунд
             }
         });
 
@@ -214,9 +230,14 @@ function updateSettings() {
 }
 
 function getTelegramUserId() {
-    // Здесь должна быть логика получения Telegram User ID
-    // Для тестирования можно использовать фиктивное значение
-    return 12345;
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
+        const userId = parseInt(window.Telegram.WebApp.initDataUnsafe.user.id, 10);
+        console.log('Реальный Telegram User ID:', userId);
+        return userId;
+    } else {
+        console.error('Не удалось получить Telegram User ID');
+        return null;
+    }
 }
 
 window.onclick = function(event) {
