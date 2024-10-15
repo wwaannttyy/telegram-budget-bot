@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 import asyncio
+from sqlalchemy import func
 
 load_dotenv()
 
@@ -90,6 +91,110 @@ async def add_expense():
     session.close()
     return jsonify({"status": "error", "message": "User not found"})
 
+@app.route('/api/get_user_data', methods=['POST'])
+async def get_user_data():
+    data = await request.get_json()
+    telegram_id = data.get('telegram_id')
+    if not telegram_id:
+        return jsonify({"status": "error", "message": "Invalid telegram_id"})
+    
+    session = Session()
+    try:
+        user = session.query(User).filter_by(telegram_id=telegram_id).first()
+        if user:
+            total_expenses = session.query(func.sum(Expense.amount)).filter_by(user_id=user.id).scalar() or 0
+            start_date = datetime.now().date()
+            days_difference = max(1, (user.last_day - start_date).days + 1)
+            daily_allowance = user.budget / days_difference
+            remaining_budget = user.budget - total_expenses
+            today_expenses = session.query(func.sum(Expense.amount)).filter(Expense.user_id == user.id, Expense.date == start_date).scalar() or 0
+            available_today = max(0, daily_allowance - today_expenses)
+            return jsonify({
+                "status": "success",
+                "has_budget": True,
+                "budget": float(user.budget),
+                "last_day": user.last_day.isoformat(),
+                "total_expenses": float(total_expenses),
+                "daily_allowance": float(daily_allowance),
+                "remaining_budget": float(remaining_budget),
+                "available_today": float(available_today)
+            })
+        else:
+            return jsonify({"status": "success", "has_budget": False})
+    except Exception as e:
+        print(f"Ошибка при получении данных пользователя: {e}")
+        return jsonify({"status": "error", "message": str(e)})
+    finally:
+        session.close()
+
+@app.route('/api/get_expenses', methods=['POST'])
+async def get_expenses():
+    data = await request.get_json()
+    telegram_id = data.get('telegram_id')
+    if not telegram_id:
+        return jsonify({"status": "error", "message": "Invalid telegram_id"})
+    
+    session = Session()
+    try:
+        user = session.query(User).filter_by(telegram_id=telegram_id).first()
+        if user:
+            expenses = session.query(Expense).filter_by(user_id=user.id).order_by(Expense.date.desc(), Expense.time.desc()).all()
+            expenses_list = [
+                {
+                    "amount": expense.amount,
+                    "date": expense.date.isoformat(),
+                    "time": expense.time.isoformat()
+                } for expense in expenses
+            ]
+            return jsonify({
+                "status": "success",
+                "expenses": expenses_list
+            })
+        else:
+            return jsonify({"status": "success", "expenses": []})
+    except Exception as e:
+        print(f"Ошибка при получении трат пользователя: {e}")
+        return jsonify({"status": "error", "message": str(e)})
+    finally:
+        session.close()
+
+@app.route('/api/delete_expense', methods=['POST'])
+async def delete_expense():
+    data = await request.get_json()
+    telegram_id = data.get('telegram_id')
+    expense_date = data.get('expense_date')
+    expense_time = data.get('expense_time')
+    expense_amount = data.get('expense_amount')
+
+    if not all([telegram_id, expense_date, expense_time, expense_amount]):
+        return jsonify({"status": "error", "message": "Missing required data"})
+
+    session = Session()
+    try:
+        user = session.query(User).filter_by(telegram_id=telegram_id).first()
+        if user:
+            expense = session.query(Expense).filter_by(
+                user_id=user.id,
+                date=datetime.strptime(expense_date, '%Y-%m-%d').date(),
+                time=datetime.strptime(expense_time, '%H:%M:%S').time(),
+                amount=float(expense_amount)
+            ).first()
+
+            if expense:
+                session.delete(expense)
+                session.commit()
+                return jsonify({"status": "success"})
+            else:
+                return jsonify({"status": "error", "message": "Expense not found"})
+        else:
+            return jsonify({"status": "error", "message": "User not found"})
+    except Exception as e:
+        print(f"Ошибка при удалении траты: {e}")
+        session.rollback()
+        return jsonify({"status": "error", "message": str(e)})
+    finally:
+        session.close()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     web_app_url = os.getenv('WEB_APP_URL')
     keyboard = [
@@ -113,12 +218,20 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = session.query(User).filter_by(telegram_id=telegram_id).first()
     if user:
         print(f"Найден пользователь: {user.telegram_id}, бюджет: {user.budget}")
-        total_expenses = session.query(Expense).filter_by(user_id=user.id).with_entities(Expense.amount).all()
-        total_expenses = sum([expense[0] for expense in total_expenses])
+        start_date = datetime.now().date()
+        days_difference = max(1, (user.last_day - start_date).days + 1)
+        daily_allowance = user.budget / days_difference
+        total_expenses = session.query(func.sum(Expense.amount)).filter_by(user_id=user.id).scalar() or 0
         remaining_budget = user.budget - total_expenses
-        message = f"Ваш текущий баланс: {remaining_budget:.2f}\n"
-        message += f"Общий бюджет: {user.budget:.2f}\n"
-        message += f"Потрачено: {total_expenses:.2f}\n"
+        
+        today_expenses = session.query(func.sum(Expense.amount)).filter(Expense.user_id == user.id, Expense.date == start_date).scalar() or 0
+        available_today = max(0, daily_allowance - today_expenses)
+        
+        message = f"Дневной лимит: {daily_allowance:.2f}\n"
+        message += f"Доступно сегодня: {available_today:.2f}\n"
+        message += f"Общий остаток: {remaining_budget:.2f}\n"
+        message += f"Потрачено всего: {total_expenses:.2f}\n"
+        message += f"Потрачено сегодня: {today_expenses:.2f}\n"
         message += f"Дата окончания бюджета: {user.last_day.strftime('%d.%m.%Y')}"
     else:
         print(f"Пользователь не найден: {telegram_id}")
@@ -148,17 +261,19 @@ async def daily_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     session = Session()
     user = session.query(User).filter_by(telegram_id=update.effective_user.id).first()
     if user:
-        today = datetime.now().date()
-        days_left = (user.last_day - today).days
-        if days_left > 0:
-            total_expenses = session.query(Expense).filter_by(user_id=user.id).with_entities(Expense.amount).all()
-            total_expenses = sum([expense[0] for expense in total_expenses])
-            remaining_budget = user.budget - total_expenses
-            daily_limit = remaining_budget / days_left
-            message = f"Ваш дневной лимит: {daily_limit:.2f}\n"
-            message += f"Осталось дней: {days_left}"
-        else:
-            message = "Срок вашего бюджета истек. Пожалуйста, обновите бюджет че��е�� веб-приложение."
+        start_date = datetime.now().date()
+        days_difference = max(1, (user.last_day - start_date).days + 1)
+        daily_allowance = user.budget / days_difference
+        total_expenses = session.query(func.sum(Expense.amount)).filter_by(user_id=user.id).scalar() or 0
+        remaining_budget = user.budget - total_expenses
+        
+        today_expenses = session.query(func.sum(Expense.amount)).filter(Expense.user_id == user.id, Expense.date == start_date).scalar() or 0
+        available_today = max(0, daily_allowance - today_expenses)
+        
+        message = f"Ваш дневной лимит: {daily_allowance:.2f}\n"
+        message += f"Доступно сегодня: {available_today:.2f}\n"
+        message += f"Осталось дней: {days_difference}\n"
+        message += f"Общий остаток: {remaining_budget:.2f}"
     else:
         message = "Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
     session.close()

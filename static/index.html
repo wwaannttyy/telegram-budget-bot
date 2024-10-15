@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Financial Management</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -21,10 +21,10 @@
         Your daily allowance will be <span id="daily-allowance">0</span>
     </div>
 
-    <button class="button" onclick="goToMainScreen()">START</button>
+    <button class="button" onclick="handleStartButton()">START</button>
 </div>
 
-<div class="container main-screen" id="main-screen">
+<div class="container main-screen" id="main-screen" style="display: none;">
     <h2>Available Today</h2>
     <div id="available-amount" style="font-size: 32px; margin-bottom: 20px;">0</div>
     <div class="available-details">Total: <span id="total-amount">0</span> until <span id="budget-end-date">--/--/----</span></div>
