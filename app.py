@@ -8,6 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import asyncio
 from sqlalchemy import func
+import psycopg2
 
 load_dotenv()
 
@@ -20,7 +21,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
-    telegram_id = Column(BigInteger, unique=True, nullable=False)  # Изменено на BigInteger
+    telegram_id = Column(BigInteger, unique=True, nullable=False) 
     budget = Column(Float)
     last_day = Column(Date)
 
@@ -158,6 +159,7 @@ async def get_expenses():
     finally:
         session.close()
 
+# Маршрут для удаления расхода
 @app.route('/api/delete_expense', methods=['POST'])
 async def delete_expense():
     data = await request.get_json()
@@ -166,13 +168,16 @@ async def delete_expense():
     expense_time = data.get('expense_time')
     expense_amount = data.get('expense_amount')
 
+    # Проверяем наличие всех необходимых данных
     if not all([telegram_id, expense_date, expense_time, expense_amount]):
         return jsonify({"status": "error", "message": "Missing required data"})
 
     session = Session()
     try:
+        # Находим пользователя
         user = session.query(User).filter_by(telegram_id=telegram_id).first()
         if user:
+            # Ищем конкретный расход для удаления
             expense = session.query(Expense).filter_by(
                 user_id=user.id,
                 date=datetime.strptime(expense_date, '%Y-%m-%d').date(),
@@ -194,6 +199,76 @@ async def delete_expense():
         return jsonify({"status": "error", "message": str(e)})
     finally:
         session.close()
+
+# Маршрут для обновления настроек пользователя
+@app.route('/api/update_settings', methods=['POST'])
+async def update_settings():
+    data = await request.get_json()
+    conn = None
+    cursor = None
+    try:
+        # Подключаемся к базе данных
+        conn = psycopg2.connect(
+            dbname=os.getenv('DB_NAME'),
+            user=os.getenv('DB_USERNAME'),
+            password=os.getenv('DB_PASSWORD'),
+            host=os.getenv('DB_HOST')
+        )
+        cursor = conn.cursor()
+
+        # Обновляем бюджет и дату окончания
+        cursor.execute(
+            """
+            UPDATE users 
+            SET budget = %s, last_day = %s 
+            WHERE telegram_id = %s 
+            RETURNING budget, last_day
+            """,
+            (data['budget'], data['last_day'], data['telegram_id'])
+        )
+        updated = cursor.fetchone()
+        conn.commit()
+
+        if updated:
+            # Получаем актуальные данные для ответа
+            cursor.execute(
+                """
+                SELECT 
+                    budget, 
+                    last_day,
+                    (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE user_id = users.id) as total_expenses
+                FROM users 
+                WHERE telegram_id = %s
+                """,
+                (data['telegram_id'],)
+            )
+            user_data = cursor.fetchone()
+            
+            if user_data:
+                # Рассчитываем новые значения
+                budget, last_day, total_expenses = user_data
+                remaining_budget = budget - total_expenses
+                days_difference = max(1, (last_day - datetime.now().date()).days + 1)
+                daily_allowance = remaining_budget / days_difference
+
+                return jsonify({
+                    "status": "success",
+                    "budget": float(budget),
+                    "last_day": last_day.isoformat(),
+                    "daily_allowance": float(daily_allowance),
+                    "remaining_budget": float(remaining_budget)
+                })
+
+        return jsonify({"status": "error", "message": "User not found"})
+
+    except Exception as e:
+        print(f"Error updating settings: {e}")
+        return jsonify({"status": "error", "message": str(e)})
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     web_app_url = os.getenv('WEB_APP_URL')
@@ -298,7 +373,6 @@ def print_all_users():
         print(f"ID: {user.id}, Telegram ID: {user.telegram_id}, Budget: {user.budget}, Last Day: {user.last_day}")
     session.close()
 
-# Вызовите эту функцию перед запуском основного приложения
 print_all_users()
 
 def test_db_connection():

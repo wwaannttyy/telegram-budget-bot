@@ -1,0 +1,10 @@
+python-telegram-bot==20.7
+quart==0.19.4
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+asyncio==3.4.3
+pyngrok==7.0.5  # Обертка Python для ngrok
+
+# Примечание: Вам также необходимо установить ngrok отдельно:
+# Ubuntu/Debian: sudo snap install ngrok
+# macOS: brew install ngrok

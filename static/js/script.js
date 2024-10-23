@@ -287,11 +287,13 @@ function hideDeleteMenuOnClickOutside(event) {
     }
 }
 
+// Функция для удаления расхода по индексу
 function deleteExpense(index) {
     if (index >= 0 && index < expenses.length) {
         const expenseToRemove = expenses[index];
         const telegramUserId = getTelegramUserId();
         
+        // Отправляем запрос на удаление расхода на сервер
         fetch('/api/delete_expense', {
             method: 'POST',
             headers: {
@@ -307,9 +309,10 @@ function deleteExpense(index) {
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                console.log('Expense deleted successfully');
+                // Удаляем расход из локального массива
                 expenses.splice(index, 1);
                 totalExpenses -= expenseToRemove.amount;
+                // Обновляем отображение данных
                 updateDisplayedData();
                 renderExpenses();
             } else {
@@ -321,13 +324,13 @@ function deleteExpense(index) {
             console.error('Error deleting expense:', error);
             alert('Произошла ошибка при удалении траты. Пожалуйста, попробуйте еще раз.');
         });
-    } else {
-        console.error("Invalid expense index");
     }
 }
 
+// Открытие модального окна настроек
 function openSettings() {
     vibrate('medium');
+    // Копируем текущие значения в модальное окно
     document.getElementById('modal-budget').value = document.getElementById('budget').value;
     document.getElementById('modal-last-day').value = document.getElementById('last-day').value;
     calculateNewDailyAllowance();
@@ -338,23 +341,66 @@ function closeModal() {
     document.getElementById('settingsModal').style.display = 'none';
 }
 
+// Расчет нового дневного лимита при изменении настроек
 function calculateNewDailyAllowance() {
-    const budget = document.getElementById('modal-budget').value;
+    const budget = parseFloat(document.getElementById('modal-budget').value);
     const lastDay = new Date(document.getElementById('modal-last-day').value);
     const today = new Date();
-
-    if (budget && lastDay) {
-        const daysDifference = Math.floor((lastDay - today) / (1000 * 60 * 60 * 24));
-        const dailyAllowance = budget / (daysDifference + 1);
+    today.setHours(0, 0, 0, 0);
+    lastDay.setHours(23, 59, 59, 999);
+    
+    if (!isNaN(budget) && lastDay) {
+        const daysDifference = Math.ceil((lastDay - today) / (1000 * 60 * 60 * 24)) + 1;
+        const dailyAllowance = budget / daysDifference;
         document.getElementById('new-daily-allowance').innerText = dailyAllowance.toFixed(2);
     }
 }
 
+// Обновление настроек на сервере
 function updateSettings() {
-    document.getElementById('budget').value = document.getElementById('modal-budget').value;
-    document.getElementById('last-day').value = document.getElementById('modal-last-day').value;
+    const newBudget = parseFloat(document.getElementById('modal-budget').value);
+    const newLastDay = document.getElementById('modal-last-day').value;
+    const telegramUserId = getTelegramUserId();
 
-    closeModal();
+    if (!telegramUserId) {
+        console.error('Не удалось получить ID пользователя Telegram');
+        alert('Ошибка: Не удалось получить ID пользователя Telegram');
+        return;
+    }
+
+    // Отправляем запрос на обновление настроек
+    fetch('/api/update_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            telegram_id: telegramUserId,
+            budget: newBudget,
+            last_day: newLastDay
+        }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // Обновляем значения в основном интерфейсе
+            document.getElementById('budget').value = newBudget;
+            document.getElementById('last-day').value = newLastDay;
+            document.getElementById('daily-allowance').innerText = data.daily_allowance.toFixed(2);
+            document.getElementById('total-amount').innerText = data.remaining_budget.toFixed(2);
+            document.getElementById('budget-end-date').innerText = new Date(data.last_day).toLocaleDateString();
+            
+            updateDisplayedData();
+            closeModal();
+            vibrate('medium');
+        } else {
+            alert('Ошибка при обновлении настроек: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Ошибка при отправке запроса:', error);
+        alert('Произошла ошибка при обновлении настроек');
+    });
 }
 
 function getTelegramUserId() {
