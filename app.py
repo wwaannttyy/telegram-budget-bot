@@ -198,48 +198,37 @@ async def delete_expense():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     web_app_url = os.getenv('WEB_APP_URL')
     keyboard = [
-        [InlineKeyboardButton("Открыть веб-версию", web_app={"url": web_app_url})]
+        [InlineKeyboardButton("🌐 Открыть веб-версию", web_app={"url": web_app_url})]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "Добро пожаловать! Нажмите кнопку ниже, чтобы открыть веб-версию приложения. "
-        "Также вы можете использовать следующие команды:\n"
-        "/balance - просмотр баланса\n"
-        "/expenses - список трат\n"
-        "/daily - дневной лимит",
+        "👋 Добро пожаловать! Нажмите кнопку ниже, чтобы открыть веб-версию приложения.\n\n"
+        "Доступные команды:\n"
+        "💰 /balance - просмотр баланса\n"
+        "📊 /expenses - список трат\n"
+        "📅 /daily - дневной лимит",
         reply_markup=reply_markup
     )
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session = Session()
-    telegram_id = update.effective_user.id
-    print(f"Запрос баланса для пользователя с Telegram ID: {telegram_id}")
-    user = session.query(User).filter_by(telegram_id=telegram_id).first()
-    if user:
-        print(f"Найден пользователь: {user.telegram_id}, бюджет: {user.budget}")
-        start_date = datetime.now().date()
-        days_difference = max(1, (user.last_day - start_date).days + 1)
-        daily_allowance = user.budget / days_difference
-        total_expenses = session.query(func.sum(Expense.amount)).filter_by(user_id=user.id).scalar() or 0
-        remaining_budget = user.budget - total_expenses
+    try:
+        telegram_id = update.effective_user.id
+        user = session.query(User).filter_by(telegram_id=telegram_id).first()
         
-        today_expenses = session.query(func.sum(Expense.amount)).filter(Expense.user_id == user.id, Expense.date == start_date).scalar() or 0
-        available_today = max(0, daily_allowance - today_expenses)
-        
-        message = f"Дневной лимит: {daily_allowance:.2f}\n"
-        message += f"Доступно сегодня: {available_today:.2f}\n"
-        message += f"Общий остаток: {remaining_budget:.2f}\n"
-        message += f"Потрачено всего: {total_expenses:.2f}\n"
-        message += f"Потрачено сегодня: {today_expenses:.2f}\n"
-        message += f"Дата окончания бюджета: {user.last_day.strftime('%d.%m.%Y')}"
-    else:
-        print(f"Пользователь не найден: {telegram_id}")
-        all_users = session.query(User).all()
-        print(f"Все пользователи в базе данных: {[user.telegram_id for user in all_users]}")
-        message = "Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
-    session.close()
-    await update.message.reply_text(message)
+        if user:
+            total_expenses = session.query(func.sum(Expense.amount)).filter_by(user_id=user.id).scalar() or 0
+            remaining_budget = user.budget - total_expenses
+            
+            message = f"💰 Общий баланс: {remaining_budget:.2f}\n"
+            message += f"📅 Дата окончания: {user.last_day.strftime('%d.%m.%Y')}"
+        else:
+            message = "❌ Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
+            
+        await update.message.reply_text(message)
+    finally:
+        session.close()
 
 async def expenses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session = Session()
@@ -247,13 +236,13 @@ async def expenses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if user:
         expenses = session.query(Expense).filter_by(user_id=user.id).order_by(Expense.date.desc(), Expense.time.desc()).limit(10).all()
         if expenses:
-            message = "Ваши последние расходы:\n"
+            message = "📊 Ваши последние расходы:\n\n"
             for expense in expenses:
-                message += f"{expense.date.strftime('%d.%m.%Y')} {expense.time.strftime('%H:%M')}: {expense.amount:.2f}\n"
+                message += f"🕒 {expense.date.strftime('%d.%m.%Y')} {expense.time.strftime('%H:%M')}: 💸 {expense.amount:.2f}\n"
         else:
-            message = "У вас пока нет расходов."
+            message = "📭 У вас пока нет расходов."
     else:
-        message = "Пользователь не найден. Пожалуйста, установите бюджет через веб-приложение."
+        message = "❌ Пользователь не найден. Пожалуйста, установите бюджет через веб-приложение."
     session.close()
     await update.message.reply_text(message)
 
@@ -270,12 +259,12 @@ async def daily_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         today_expenses = session.query(func.sum(Expense.amount)).filter(Expense.user_id == user.id, Expense.date == start_date).scalar() or 0
         available_today = max(0, daily_allowance - today_expenses)
         
-        message = f"Ваш дневной лимит: {daily_allowance:.2f}\n"
-        message += f"Доступно сегодня: {available_today:.2f}\n"
-        message += f"Осталось дней: {days_difference}\n"
-        message += f"Общий остаток: {remaining_budget:.2f}"
+        message = f"📊 Ваш дневной лимит: {daily_allowance:.2f}\n"
+        message += f"💰 Доступно сегодня: {available_today:.2f}\n"
+        message += f"📅 Осталось дней: {days_difference}\n"
+        message += f"💎 Общий остаток: {remaining_budget:.2f}"
     else:
-        message = "Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
+        message = "❌ Бюджет не установлен. Пожалуйста, установите бюджет через веб-приложение."
     session.close()
     await update.message.reply_text(message)
 

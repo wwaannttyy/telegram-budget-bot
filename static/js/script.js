@@ -22,19 +22,15 @@ function calculateDailyAllowance() {
     const budget = parseFloat(document.getElementById('budget').value);
     const lastDay = new Date(document.getElementById('last-day').value);
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    lastDay.setHours(23, 59, 59, 999);
     
     if (!isNaN(budget) && lastDay) {
-        const daysDifference = Math.max(1, Math.floor((lastDay - today) / (1000 * 60 * 60 * 24)) + 1);
-        const dailyAllowance = budget / daysDifference;
+        const daysDifference = Math.ceil((lastDay - today) / (1000 * 60 * 60 * 24));
+        const dailyAllowance = (budget - totalExpenses) / daysDifference;
+        
         const remainingBudget = budget - totalExpenses;
-        
-        // Вычисляем траты за сегодня
-        const todayExpenses = expenses.filter(expense => {
-            const expenseDate = new Date(expense.date);
-            return expenseDate.toDateString() === today.toDateString();
-        }).reduce((sum, expense) => sum + expense.amount, 0);
-        
-        const availableToday = Math.max(0, dailyAllowance - todayExpenses);
+        const availableToday = Math.max(0, dailyAllowance);
         
         document.getElementById('daily-allowance').innerText = dailyAllowance.toFixed(2);
         document.getElementById('available-amount').innerText = availableToday.toFixed(2);
@@ -95,6 +91,8 @@ function updateDisplayedData(data) {
     document.getElementById('available-amount').innerText = data.daily_allowance.toFixed(2);
     document.getElementById('total-amount').innerText = data.remaining_budget.toFixed(2);
     document.getElementById('budget-end-date').innerText = new Date(data.last_day).toLocaleDateString();
+    totalBudget = parseFloat(data.budget);
+    totalExpenses = parseFloat(data.total_expenses);
 }
 
 function showInitialScreen() {
@@ -170,7 +168,10 @@ function addExpense() {
 
         expenses.push(expense);
         totalExpenses += expenseAmount;
-        calculateDailyAllowance();
+        
+        // Обновляем отображаемые данные
+        updateDisplayedData();
+        
         renderExpenses();
         closeExpenseModal();
 
@@ -210,7 +211,7 @@ function renderExpenses() {
         const expenseItem = document.createElement('div');
         expenseItem.className = 'expense-item';
         expenseItem.innerHTML = `
-            <div class="expense-date">${expense.date} at ${expense.time}</div>
+            <div class="expense-date">${expense.date} в ${expense.time}</div>
             <div class="expense-amount">${expense.amount.toFixed(2)}</div>
         `;
 
@@ -309,7 +310,7 @@ function deleteExpense(index) {
                 console.log('Expense deleted successfully');
                 expenses.splice(index, 1);
                 totalExpenses -= expenseToRemove.amount;
-                calculateDailyAllowance();
+                updateDisplayedData();
                 renderExpenses();
             } else {
                 console.error('Error deleting expense:', data.message);
@@ -414,8 +415,62 @@ window.onload = function() {
     document.body.addEventListener('touchmove', preventBodyScroll, { passive: false });
 };
 
+function calculateBudgetPerDay(totalBudget, duration, expenses = []) {
+    const remainingBudget = expenses.reduce(
+        (budget, expense) => budget - expense.amount,
+        totalBudget
+    );
+    return Math.round((100 * remainingBudget) / duration) / 100;
+}
+
 function handleStartButton() {
     vibrate('medium');
+    const budget = parseFloat(document.getElementById('budget').value);
+    const lastDay = new Date(document.getElementById('last-day').value);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Устанавливаем время на начало дня
+    lastDay.setHours(23, 59, 59, 999); // Устанавливаем время на конец дня
+
+    if (!isNaN(budget) && lastDay) {
+        // Рассчитываем количество дней, включая начальный и конечный дни
+        const daysDifference = Math.ceil((lastDay - today) / (1000 * 60 * 60 * 24));
+        const dailyAllowance = budget / daysDifference;
+        
+        document.getElementById('daily-allowance').innerText = dailyAllowance.toFixed(2);
+        document.getElementById('available-amount').innerText = dailyAllowance.toFixed(2);
+        document.getElementById('total-amount').innerText = budget.toFixed(2);
+        document.getElementById('budget-end-date').innerText = lastDay.toLocaleDateString();
+        
+        totalBudget = budget;
+        totalExpenses = 0;
+        expenses = [];
+    }
+
     saveBudgetToServer();
     goToMainScreen();
+}
+
+function updateDisplayedData() {
+    const budget = parseFloat(document.getElementById('budget').value);
+    const lastDay = new Date(document.getElementById('last-day').value);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    lastDay.setHours(23, 59, 59, 999);
+    
+    if (!isNaN(budget) && lastDay) {
+        const daysDifference = Math.ceil((lastDay - today) / (1000 * 60 * 60 * 24)) + 1;
+        const dailyAllowance = calculateBudgetPerDay(budget, daysDifference, expenses);
+        
+        const todayExpenses = expenses
+            .filter(exp => new Date(exp.date).toDateString() === today.toDateString())
+            .reduce((sum, exp) => sum + exp.amount, 0);
+        
+        const availableToday = Math.max(0, dailyAllowance - todayExpenses);
+        const remainingBudget = budget - totalExpenses;
+        
+        document.getElementById('daily-allowance').innerText = dailyAllowance.toFixed(2);
+        document.getElementById('available-amount').innerText = availableToday.toFixed(2);
+        document.getElementById('total-amount').innerText = remainingBudget.toFixed(2);
+        document.getElementById('budget-end-date').innerText = lastDay.toLocaleDateString();
+    }
 }
